@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Codex Linux Wrapper
+Comment=Run Codex macOS app payload on Linux
+Exec=sh -c 'DIR="$(dirname "%k")"; "$DIR/run-codex-linux.sh"'
+Icon=utilities-terminal
+Terminal=false
+Categories=Development;Utility;

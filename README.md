@@ -1,8 +1,17 @@
-# Codex Linux Wrapper (Ubuntu/Linux)
+# Codex Linux Porter (Ubuntu/Linux)
 
-This project runs the macOS Codex Electron app on Linux by reusing the app payload from the DMG and launching it with a Linux Electron runtime.
+> [!IMPORTANT]
+> This is an unofficial community project for running the macOS Codex app on Linux.
+> It is not affiliated with, endorsed by, or supported by OpenAI.
+> Treat it as a temporary bridge until an official Linux app exists.
 
-## What this wrapper does
+This project ports the macOS Codex Electron app to Linux by reusing the app payload from the DMG, rebuilding the platform-specific pieces, and launching it with a Linux Electron runtime. It is an unofficial compatibility layer, not an official OpenAI Linux app.
+
+
+![](assets/20260311_233717_codexonubuntu.png)
+
+
+## What this porter does
 
 - Extracts the Codex `.dmg` file.
 - Pulls `Codex.app/Contents/Resources/app.asar` from the DMG.
@@ -10,6 +19,16 @@ This project runs the macOS Codex Electron app on Linux by reusing the app paylo
 - Launches the unpacked Electron app payload with Linux-compatible `electron`.
 
 The UI is still the official Codex app; only the runtime host changes.
+
+## Status and support
+
+This project is a temporary Linux workaround for people who want to use Codex before there is an official Linux desktop app.
+
+- This is not an OpenAI product.
+- OpenAI does not provide support for this porter.
+- Breakage is possible when Codex changes its packaged app structure or native modules.
+- You should expect to re-run bootstrap steps when a new DMG is released.
+- If an official Linux app becomes available, that should be preferred over this project.
 
 ## Folder layout
 
@@ -69,20 +88,20 @@ Inside the app, one startup path starts the app backend using the CLI command:
 
 - `bash -lc "codex app-server"`
 
-So the wrapper relies on the **same `codex` CLI binary you already use on Linux**.
+So the porter relies on the **same `codex` CLI binary you already use on Linux**.
 
 ### Sandbox note
 
 There are two separate sandbox layers here:
 
-- Electron sandbox: the wrapper's Linux fallback currently disables Chromium's sandbox with `--no-sandbox`.
+- Electron sandbox: the porter's Linux fallback currently disables Chromium's sandbox with `--no-sandbox`.
 - Codex agent command sandbox: the app backend still runs through `codex app-server`, which uses your normal Codex CLI config from `~/.codex/config.toml` for agent behavior and approvals.
 
-That means this wrapper is less isolated than `codex --full-auto`, but it is not the same as launching the Codex agent with `--dangerously-bypass-approvals-and-sandbox`.
+That means this porter is less isolated than `codex --full-auto`, but it is not the same as launching the Codex agent with `--dangerously-bypass-approvals-and-sandbox`.
 
 ## Login: GPT login (no API key)
 
-This wrapper does not require API keys.
+This porter does not require API keys.
 
 Use this once:
 
@@ -90,7 +109,7 @@ Use this once:
 codex login
 ```
 
-That flow stores interactive auth state in the CLI user config. After that, the wrapper’s embedded app-server uses the CLI’s auth context automatically.
+That flow stores interactive auth state in the CLI user config. After that, the porter’s embedded app-server uses the CLI’s auth context automatically.
 
 Useful checks:
 
@@ -99,25 +118,28 @@ codex login status
 codex --help | head -n 1
 ```
 
-If you still want key-based auth, CLI also supports `codex login --with-api-key`, but this wrapper’s intended local workflow is GPT/dev account login.
+If you still want key-based auth, CLI also supports `codex login --with-api-key`, but this porter’s intended local workflow is GPT/dev account login.
 
 ## Can I change the UX?
 
 Short answer: yes, but with caveats.
 
 What is safe/low risk:
+
 - Frontend tweaks in extracted assets under `work/app/webview`.
 - Replace static assets/icons/styles and restart app.
 
 What is risky:
+
 - Editing minified runtime code directly (`work/app/.vite/build/*.js`) can be fragile.
 - Native bridge IPC assumptions and packaged assumptions can break quickly.
 - Any mismatch in asset paths or preload contracts can crash startup.
 
 Recommended path for real UX changes:
+
 1. Patch Codex source in upstream repo.
-2. Build Linux-compatible app bundle there (or re-create wrapper from your own built payload).
-3. Re-import into wrapper flow.
+2. Build Linux-compatible app bundle there (or re-create the porter from your own built payload).
+3. Re-import into the porter flow.
 
 ## Will updates work?
 
@@ -126,9 +148,11 @@ Not in the automatic way.
 The app’s built-in updater is configured through Sparkle and only starts on macOS production builds:
 
 - `shouldIncludeSparkle` returns true only for macOS in non-dev build flavors.
-- This Linux wrapper path runs as unpacked app dir with no Sparkle runtime on Linux.
+- This Linux porter path runs as an unpacked app dir with no Sparkle runtime on Linux.
 
-Result: “Check for Updates” effectively no-op / unavailable under Linux wrapper.
+Result: “Check for Updates” is effectively a no-op / unavailable under the Linux porter.
+
+If OpenAI changes the macOS app packaging, startup flow, or native modules, this porter may need updates before it works again.
 
 For updates:
 
@@ -139,14 +163,14 @@ For updates:
 ./setup/bootstrap.sh /path/to/new/Codex.dmg
 ```
 
-The wrapper is re-primed with the new payload.
+The porter is re-primed with the new payload.
 
 ## Commands
 
 Full bootstrap:
 
 ```bash
-cd /path/to/codex-linux-wrapper
+cd /path/to/codex-linux-porter
 ./setup/bootstrap.sh /path/to/Codex.dmg
 codex login
 ./run-codex-linux.sh
@@ -166,66 +190,4 @@ Verification:
 
 ```bash
 ./setup/05_verify_stack.sh
-```
-
-Common expected outputs:
-- `run-codex-linux.sh` finds Electron.
-- CLI present at `codex`.
-- App payload exists (`app.asar`, `app/`).
-- Native addons show ELF format.
-
-## Troubleshooting
-
-- **`dangerous link ignored: Codex Installer/Applications`** during extraction: normal for macOS DMG symlink entries. Ignore.
-- **App opens then exits with missing module / ABI errors**: rerun `./setup/04_fix_native_modules.sh`.
-- **App process starts but no window appears**: rerun `./setup/06_patch_sidebar_fallback.sh` or rerun full bootstrap so the primary-window startup patch is re-applied to the extracted bundle.
-- **Electron sandbox error about `chrome-sandbox` / setuid helper**: expected when using the `npx electron` fallback. The wrapper uses `--no-sandbox` by default on Linux to avoid that failure.
-- **Startup still fails**: delete `work`, re-run bootstrap from a fresh DMG.
-
-## Desktop launcher
-
-Optional menu entry:
-
-```ini
-# <REPO_ROOT>/codex.desktop
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=Codex Linux Wrapper
-Comment=Run Codex macOS app payload on Linux
-Exec=sh -c 'DIR="$(dirname "%k")"; "$DIR/run-codex-linux.sh"'
-Icon=utilities-terminal
-Terminal=false
-Categories=Development;Utility;
-```
-
-## Clean GitHub repository
-
-This folder is intentionally minimal and commit-friendly:
-
-- It does **not** include the generated `work/` payload.
-- The repo is ready for first-time `git init`, commit, and push.
-
-Quick setup:
-
-```bash
-cd /path/to/codex-linux-wrapper-github
-git init
-git add .
-git status
-git commit -m "feat: add ubuntu wrapper and bootstrap instructions"
-```
-
-Then connect to GitHub without pushing from this host:
-
-```bash
-git branch -M main
-git remote add origin git@github.com:<you>/<repo>.git
-git remote -v
-```
-
-When you are ready to publish from another machine:
-
-```bash
-git push -u origin main
 ```

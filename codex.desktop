@@ -1,9 +1,11 @@
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=Codex Linux Wrapper
-Comment=Run Codex macOS app payload on Linux
-Exec=sh -c 'DIR="$(dirname "%k")"; "$DIR/run-codex-linux.sh"'
+Name=Codex Linux Porter
+Comment=Run the Codex macOS app payload on Linux
+Exec=/home/adys-x1/Sources/codex-linux-wrapper-github/run-codex-linux.sh
+Path=/home/adys-x1/Sources/codex-linux-wrapper-github
 Icon=utilities-terminal
 Terminal=false
 Categories=Development;Utility;
+StartupNotify=true

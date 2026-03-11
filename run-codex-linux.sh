@@ -2,14 +2,64 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HOME_DIR="${HOME:-$(getent passwd "$(id -un)" | cut -d: -f6)}"
 WORK_DIR="${WORK_DIR:-"$SCRIPT_DIR/work"}"
 APP_DIR="${APP_DIR:-"$WORK_DIR/app"}"
 APP_ASAR_PATH="${APP_ASAR_PATH:-"$WORK_DIR/app.asar"}"
 ELECTRON_BIN="${ELECTRON_BIN:-"${ELECTRON:-electron}"}"
-CODEX_CLI_PATH="${CODEX_CLI_PATH:-"$(command -v codex || true)"}"
 ELECTRON_CACHE_DIR="${ELECTRON_CACHE_DIR:-"$WORK_DIR/.electron-npx-cache"}"
 ELECTRON_XDG_CACHE_DIR="${ELECTRON_XDG_CACHE_DIR:-"$WORK_DIR/.cache/electron"}"
 mkdir -p "$ELECTRON_CACHE_DIR" "$ELECTRON_XDG_CACHE_DIR"
+
+prepend_path() {
+  local dir_path="$1"
+
+  [[ -d "$dir_path" ]] || return 0
+  case ":$PATH:" in
+    *":$dir_path:"*) ;;
+    *) PATH="$dir_path:$PATH" ;;
+  esac
+}
+
+augment_user_tool_paths() {
+  prepend_path "$HOME_DIR/.local/bin"
+
+  if [[ -n "${NVM_BIN:-}" ]]; then
+    prepend_path "$NVM_BIN"
+    return
+  fi
+
+  local nvm_bin_dir
+  nvm_bin_dir="$(find "$HOME_DIR/.nvm/versions/node" -mindepth 2 -maxdepth 2 -type d -name bin 2>/dev/null | sort -V | tail -n 1 || true)"
+  if [[ -n "$nvm_bin_dir" ]]; then
+    prepend_path "$nvm_bin_dir"
+  fi
+}
+
+augment_user_tool_paths
+export PATH
+
+resolve_codex_cli_path() {
+  local candidate=""
+
+  if [[ -n "${CODEX_CLI_PATH:-}" ]]; then
+    candidate="${CODEX_CLI_PATH}"
+  elif candidate="$(command -v codex 2>/dev/null || true)"; [[ -n "$candidate" ]]; then
+    :
+  elif [[ -x "$HOME_DIR/.local/bin/codex" ]]; then
+    candidate="$HOME_DIR/.local/bin/codex"
+  else
+    local nvm_codex
+    nvm_codex="$(find "$HOME_DIR/.nvm/versions/node" -path '*/bin/codex' 2>/dev/null | sort -V | tail -n 1 || true)"
+    if [[ -n "$nvm_codex" ]]; then
+      candidate="$nvm_codex"
+    fi
+  fi
+
+  if [[ -n "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+  fi
+}
 
 resolve_electron_version() {
   if command -v "$ELECTRON_BIN" >/dev/null 2>&1; then
@@ -82,6 +132,8 @@ else
   echo "No unpacked app dir or app.asar. Run setup scripts first." >&2
   exit 1
 fi
+
+CODEX_CLI_PATH="$(resolve_codex_cli_path)"
 
 if [[ -n "$CODEX_CLI_PATH" ]]; then
   export CODEX_CLI_PATH

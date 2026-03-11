@@ -8,7 +8,7 @@ APP_DIR="${APP_DIR:-"$WORK_DIR/app"}"
 APP_ASAR_PATH="${APP_ASAR_PATH:-"$WORK_DIR/app.asar"}"
 CODEX_CLI_PATH="${CODEX_CLI_PATH:-"$(command -v codex || true)"}"
 ELECTRON_BIN="${ELECTRON_BIN:-"${ELECTRON:-electron}"}"
-ELECTRON_CACHE_DIR="$WORK_DIR/.npm-cache"
+ELECTRON_CACHE_DIR="${ELECTRON_CACHE_DIR:-"$WORK_DIR/.electron-npx-cache"}"
 ELECTRON_XDG_CACHE_DIR="${ELECTRON_XDG_CACHE_DIR:-"$WORK_DIR/.cache/electron"}"
 declare -A EXPECTED_NATIVE_ARTIFACTS=(
   ["better-sqlite3"]="build/Release/better_sqlite3.node"
@@ -41,8 +41,15 @@ NODE
 }
 
 resolve_electron_command() {
+  local disable_sandbox="${ELECTRON_DISABLE_SANDBOX:-1}"
+  local electron_args=()
+
+  if [[ "$disable_sandbox" == "1" ]]; then
+    electron_args+=(--no-sandbox)
+  fi
+
   if command -v "$ELECTRON_BIN" >/dev/null 2>&1; then
-    ELECTRON_CMD=(env ELECTRON_DISABLE_SANDBOX="${ELECTRON_DISABLE_SANDBOX:-1}" "$ELECTRON_BIN")
+    ELECTRON_CMD=(env ELECTRON_DISABLE_SANDBOX="$disable_sandbox" "$ELECTRON_BIN" "${electron_args[@]}")
     return
   fi
 
@@ -51,8 +58,8 @@ resolve_electron_command() {
     ver="$(resolve_electron_version)"
     ELECTRON_CMD=(env \
       XDG_CACHE_HOME="$ELECTRON_XDG_CACHE_DIR" \
-      ELECTRON_DISABLE_SANDBOX="${ELECTRON_DISABLE_SANDBOX:-1}" \
-      npx --cache "$ELECTRON_CACHE_DIR" --yes "electron@$ver")
+      ELECTRON_DISABLE_SANDBOX="$disable_sandbox" \
+      npx --cache "$ELECTRON_CACHE_DIR" --yes "electron@$ver" "${electron_args[@]}")
     return
   fi
 

@@ -6,9 +6,11 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORK_DIR="${WORK_DIR:-"$ROOT_DIR/work"}"
 ASSETS_DIR="$WORK_DIR/app/webview/assets"
 INDEX_HTML="$WORK_DIR/app/webview/index.html"
+MAIN_PROCESS_BUNDLE="$WORK_DIR/app/.vite/build/main.js"
 RENDER_FIX_JS="$ASSETS_DIR/codex-linux-render-fix.js"
 CSS_MARKER="Codex Linux wrapper sidebar fallback v2"
 JS_MARKER="window.__codexLinuxRenderFix"
+WINDOW_PATCH_MARKER='a.once(`ready-to-show`,()=>{a.isDestroyed()||(a.show(),a.focus())})'
 RENDER_FIX_ENABLED="${ENABLE_SIDEBAR_RENDER_FIX:-1}"
 
 CSS_PATTERN="$WORK_DIR/app/webview/assets/index-*.css"
@@ -21,6 +23,11 @@ fi
 
 if [[ ! -f "$INDEX_HTML" ]]; then
   echo "No webview index.html found at $INDEX_HTML." >&2
+  exit 1
+fi
+
+if [[ ! -f "$MAIN_PROCESS_BUNDLE" ]]; then
+  echo "No main process bundle found at $MAIN_PROCESS_BUNDLE." >&2
   exit 1
 fi
 
@@ -197,6 +204,54 @@ fi
 
 if [[ "${RENDER_FIX_ENABLED}" != "0" ]] && ! grep -q "$JS_MARKER" "$RENDER_FIX_JS"; then
   echo "Warning: render-fix helper file content check failed: $RENDER_FIX_JS"
+  exit 1
+fi
+
+if grep -q "$WINDOW_PATCH_MARKER" "$MAIN_PROCESS_BUNDLE"; then
+  echo "Primary window startup patch already applied: $MAIN_PROCESS_BUNDLE"
+else
+  set +e
+  MAIN_PROCESS_BUNDLE="$MAIN_PROCESS_BUNDLE" node - <<'NODE'
+const fs = require("fs")
+
+const bundlePath = process.env.MAIN_PROCESS_BUNDLE
+const source = fs.readFileSync(bundlePath, "utf8")
+const replacement = "show:i});return i||(a.once(`ready-to-show`,()=>{a.isDestroyed()||(a.show(),a.focus())}),sie(a,n.id)),a"
+
+const variants = [
+  "show:!0});return i||sie(a,n.id),a",
+  "show:i});return i||sie(a,n.id),a",
+]
+
+let next = source
+let changed = false
+for (const variant of variants) {
+  if (next.includes(variant)) {
+    next = next.replace(variant, replacement)
+    changed = true
+    break
+  }
+}
+
+if (!changed) {
+  process.exit(2)
+}
+
+fs.writeFileSync(bundlePath, next)
+NODE
+  PATCH_RC=$?
+  set -e
+
+  if [[ $PATCH_RC -ne 0 ]]; then
+    echo "Failed to apply primary window startup patch to $MAIN_PROCESS_BUNDLE." >&2
+    exit 1
+  fi
+
+  echo "Applied primary window startup patch to $MAIN_PROCESS_BUNDLE"
+fi
+
+if ! grep -q "$WINDOW_PATCH_MARKER" "$MAIN_PROCESS_BUNDLE"; then
+  echo "Warning: primary window startup marker not found after patch: $MAIN_PROCESS_BUNDLE" >&2
   exit 1
 fi
 

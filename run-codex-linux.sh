@@ -7,7 +7,7 @@ APP_DIR="${APP_DIR:-"$WORK_DIR/app"}"
 APP_ASAR_PATH="${APP_ASAR_PATH:-"$WORK_DIR/app.asar"}"
 ELECTRON_BIN="${ELECTRON_BIN:-"${ELECTRON:-electron}"}"
 CODEX_CLI_PATH="${CODEX_CLI_PATH:-"$(command -v codex || true)"}"
-ELECTRON_CACHE_DIR="$WORK_DIR/.npm-cache"
+ELECTRON_CACHE_DIR="${ELECTRON_CACHE_DIR:-"$WORK_DIR/.electron-npx-cache"}"
 ELECTRON_XDG_CACHE_DIR="${ELECTRON_XDG_CACHE_DIR:-"$WORK_DIR/.cache/electron"}"
 mkdir -p "$ELECTRON_CACHE_DIR" "$ELECTRON_XDG_CACHE_DIR"
 
@@ -29,9 +29,34 @@ NODE
   echo "40.0.0"
 }
 
+resolve_app_metadata_field() {
+  local field_name="$1"
+
+  if [[ ! -f "$APP_DIR/package.json" ]]; then
+    echo ""
+    return
+  fi
+
+  APP_DIR_ENV="$APP_DIR" FIELD_NAME="$field_name" node - <<'NODE'
+const fs = require("fs")
+const pkg = JSON.parse(fs.readFileSync(process.env.APP_DIR_ENV + "/package.json", "utf8"))
+const value = pkg[process.env.FIELD_NAME]
+if (typeof value === "string" && value.trim()) {
+  process.stdout.write(value.trim())
+}
+NODE
+}
+
 resolve_electron_command() {
+  local disable_sandbox="${ELECTRON_DISABLE_SANDBOX:-1}"
+  local electron_args=()
+
+  if [[ "$disable_sandbox" == "1" ]]; then
+    electron_args+=(--no-sandbox)
+  fi
+
   if command -v "$ELECTRON_BIN" >/dev/null 2>&1; then
-    ELECTRON_CMD=(env ELECTRON_DISABLE_SANDBOX="${ELECTRON_DISABLE_SANDBOX:-1}" "$ELECTRON_BIN")
+    ELECTRON_CMD=(env ELECTRON_DISABLE_SANDBOX="$disable_sandbox" "$ELECTRON_BIN" "${electron_args[@]}")
     return
   fi
 
@@ -40,8 +65,8 @@ resolve_electron_command() {
     ver="$(resolve_electron_version)"
     ELECTRON_CMD=(env \
       XDG_CACHE_HOME="$ELECTRON_XDG_CACHE_DIR" \
-      ELECTRON_DISABLE_SANDBOX="${ELECTRON_DISABLE_SANDBOX:-1}" \
-      npx --cache "$ELECTRON_CACHE_DIR" --yes "electron@$ver")
+      ELECTRON_DISABLE_SANDBOX="$disable_sandbox" \
+      npx --cache "$ELECTRON_CACHE_DIR" --yes "electron@$ver" "${electron_args[@]}")
     return
   fi
 
@@ -71,8 +96,28 @@ if ((${#ELECTRON_CMD[@]} == 0)); then
   exit 1
 fi
 
+if [[ -z "${BUILD_FLAVOR:-}" ]]; then
+  BUILD_FLAVOR="$(resolve_app_metadata_field "codexBuildFlavor")"
+  if [[ -n "$BUILD_FLAVOR" ]]; then
+    export BUILD_FLAVOR
+  fi
+fi
+
+if [[ -z "${CODEX_BUILD_NUMBER:-}" ]]; then
+  CODEX_BUILD_NUMBER="$(resolve_app_metadata_field "codexBuildNumber")"
+  if [[ -n "$CODEX_BUILD_NUMBER" ]]; then
+    export CODEX_BUILD_NUMBER
+  fi
+fi
+
 export ELECTRON_FORCE_IS_PACKAGED=1
 export NODE_ENV=production
+
+if [[ -d "$APP_SOURCE" ]]; then
+  cd "$APP_SOURCE"
+else
+  cd "$(dirname "$APP_SOURCE")"
+fi
 
 if [[ "${CODEX_DEBUG:-0}" == "1" ]]; then
   echo "Launching Electron app from: $APP_SOURCE"

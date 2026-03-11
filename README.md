@@ -6,7 +6,7 @@ This project runs the macOS Codex Electron app on Linux by reusing the app paylo
 
 - Extracts the Codex `.dmg` file.
 - Pulls `Codex.app/Contents/Resources/app.asar` from the DMG.
-- Rebuilds native modules (`better-sqlite3`, `node-pty`) so they can run on Linux.
+- Reinstalls and rebuilds Linux-compatible native modules (`better-sqlite3`, `node-pty`) for the bundled Electron version.
 - Launches the unpacked Electron app payload with Linux-compatible `electron`.
 
 The UI is still the official Codex app; only the runtime host changes.
@@ -18,7 +18,7 @@ The UI is still the official Codex app; only the runtime host changes.
   - `app.asar` → extracted app bundle from `app.asar`.
   - `app/` → unpacked asar app source used by Electron.
   - `extracted_dmg/` → temporary extract tree from 7z.
-  - `payload/info` and `.npm-cache`/`work` helper folders.
+  - `payload/info`, `.cache/`, `.electron-npx-cache/`, and `native-rebuild/` helper folders.
 - `setup/*.sh` → bootstrap + setup pipeline scripts.
 - `run-codex-linux.sh` → runtime launcher.
 
@@ -44,9 +44,10 @@ Flow:
 1. `setup/01_download_or_link_dmg.sh` copies/gets `Codex.dmg`.
 2. `setup/02_extract_codex.sh` extracts it with `7z` and copies `app.asar`.
 3. `setup/03_unpack_asar.sh` unpacks `app.asar` into `work/app`.
-4. `setup/04_fix_native_modules.sh` compiles Linux native addons (`better-sqlite3`, `node-pty`) with C++20 flags.
-5. `setup/05_verify_stack.sh` checks Electron/CLI/native compatibility.
-6. `run-codex-linux.sh` launches `electron` on `work/app`.
+4. `setup/04_fix_native_modules.sh` stages fresh module installs and builds Linux native addons for the app's Electron ABI.
+5. `setup/06_patch_sidebar_fallback.sh` applies the Linux render fixes and patches the hidden-window startup path in the extracted main bundle.
+6. `setup/05_verify_stack.sh` checks Electron/CLI/native compatibility.
+7. `run-codex-linux.sh` launches `electron` on `work/app`.
 
 ### Why this can work without rebuilding everything
 
@@ -60,13 +61,24 @@ Flow:
 
 - `--` command uses your installed `electron` binary when available.
 - If missing, it falls back to `npx electron@<version>`.
+- On Linux, the fallback launcher uses `--no-sandbox` by default because the downloaded Electron runtime does not ship with a working setuid sandbox helper on typical user systems.
 - Electron is pointed at `work/app` (unpacked payload).
+- The launcher exports `BUILD_FLAVOR` and `CODEX_BUILD_NUMBER` from the unpacked app metadata so the packaged runtime checks succeed.
 
 Inside the app, one startup path starts the app backend using the CLI command:
 
 - `bash -lc "codex app-server"`
 
 So the wrapper relies on the **same `codex` CLI binary you already use on Linux**.
+
+### Sandbox note
+
+There are two separate sandbox layers here:
+
+- Electron sandbox: the wrapper's Linux fallback currently disables Chromium's sandbox with `--no-sandbox`.
+- Codex agent command sandbox: the app backend still runs through `codex app-server`, which uses your normal Codex CLI config from `~/.codex/config.toml` for agent behavior and approvals.
+
+That means this wrapper is less isolated than `codex --full-auto`, but it is not the same as launching the Codex agent with `--dangerously-bypass-approvals-and-sandbox`.
 
 ## Login: GPT login (no API key)
 
@@ -147,7 +159,8 @@ Optional env overrides:
 - `APP_DIR` and `APP_ASAR_PATH`
 - `ELECTRON_BIN`
 - `CODEX_CLI_PATH`
-- `ELECTRON_DISABLE_SANDBOX=1` (defaults from launcher)
+- `ELECTRON_DISABLE_SANDBOX=1` (default for the Linux fallback launcher)
+- `ELECTRON_CACHE_DIR` and `ELECTRON_XDG_CACHE_DIR`
 
 Verification:
 
@@ -165,6 +178,8 @@ Common expected outputs:
 
 - **`dangerous link ignored: Codex Installer/Applications`** during extraction: normal for macOS DMG symlink entries. Ignore.
 - **App opens then exits with missing module / ABI errors**: rerun `./setup/04_fix_native_modules.sh`.
+- **App process starts but no window appears**: rerun `./setup/06_patch_sidebar_fallback.sh` or rerun full bootstrap so the primary-window startup patch is re-applied to the extracted bundle.
+- **Electron sandbox error about `chrome-sandbox` / setuid helper**: expected when using the `npx electron` fallback. The wrapper uses `--no-sandbox` by default on Linux to avoid that failure.
 - **Startup still fails**: delete `work`, re-run bootstrap from a fresh DMG.
 
 ## Desktop launcher

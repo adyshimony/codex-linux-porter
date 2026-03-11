@@ -7,9 +7,9 @@ WORK_DIR="${WORK_DIR:-"$ROOT_DIR/work"}"
 APP_DIR="${APP_DIR:-"$WORK_DIR/app"}"
 ELECTRON_BIN="${ELECTRON_BIN:-"${ELECTRON:-electron}"}"
 ELECTRON_VERSION="${ELECTRON_VERSION:-""}"
-NPM_CACHE_DIR="$WORK_DIR/.npm-cache"
+REBUILD_TMP_DIR="${REBUILD_TMP_DIR:-"$WORK_DIR/native-rebuild"}"
+NPM_CACHE_DIR="${NPM_CACHE_DIR:-"$REBUILD_TMP_DIR/.npm-cache"}"
 ELECTRON_XDG_CACHE_DIR="${ELECTRON_XDG_CACHE_DIR:-"$WORK_DIR/.cache/electron"}"
-REBUILD_TMP_DIR="$WORK_DIR/native-rebuild"
 ELECTRON_DISABLE_SANDBOX="${ELECTRON_DISABLE_SANDBOX:-1}"
 declare -A NATIVE_MODULE_ARTIFACTS
 NATIVE_MODULE_ARTIFACTS=(
@@ -54,6 +54,35 @@ NODE
   echo ""
 }
 
+resolve_module_version() {
+  local module_name="$1"
+
+  if [[ -f "$APP_DIR/node_modules/$module_name/package.json" ]]; then
+    MODULE_PKG_PATH="$APP_DIR/node_modules/$module_name/package.json" node - <<'NODE'
+const fs = require("fs")
+const pkg = JSON.parse(fs.readFileSync(process.env.MODULE_PKG_PATH, "utf8"))
+process.stdout.write((pkg.version || "").trim())
+NODE
+    return
+  fi
+
+  if [[ -f "$APP_DIR/package.json" ]]; then
+    APP_PKG_PATH="$APP_DIR/package.json" MODULE_NAME="$module_name" node - <<'NODE'
+const fs = require("fs")
+const pkg = JSON.parse(fs.readFileSync(process.env.APP_PKG_PATH, "utf8"))
+const moduleName = process.env.MODULE_NAME
+const raw =
+  pkg.dependencies?.[moduleName] ||
+  pkg.optionalDependencies?.[moduleName] ||
+  ""
+process.stdout.write(String(raw).replace(/^[~^]/, "").trim())
+NODE
+    return
+  fi
+
+  echo ""
+}
+
 ensure_build_env() {
   local cflags="${CXXFLAGS:-}"
   local cxxflags="${npm_config_cxxflags:-}"
@@ -83,6 +112,9 @@ ensure_build_env() {
 
   export XDG_CACHE_HOME="$ELECTRON_XDG_CACHE_DIR"
   export npm_config_cache="$NPM_CACHE_DIR"
+  export npm_config_fund="false"
+  export npm_config_audit="false"
+  export npm_config_update_notifier="false"
 }
 
 ensure_artifact_present() {
@@ -110,11 +142,56 @@ ensure_artifact_present() {
 
 replace_with_local_install() {
   local module_name="$1"
+  local module_version
+  local stage_dir
+  local staged_module_dir
+  local target_dir
+
   ensure_build_env
-  if ! npm rebuild "$module_name" --build-from-source; then
-    warn "Local fallback rebuild failed for ${module_name}."
+
+  module_version="$(resolve_module_version "$module_name")"
+  if [[ -z "$module_version" ]]; then
+    warn "Could not resolve bundled version for ${module_name}."
     return 1
   fi
+
+  stage_dir="$REBUILD_TMP_DIR/$module_name"
+  staged_module_dir="$stage_dir/node_modules/$module_name"
+  target_dir="$APP_DIR/node_modules/$module_name"
+
+  rm -rf "$stage_dir"
+  mkdir -p "$stage_dir"
+
+  cat > "$stage_dir/package.json" <<JSON
+{
+  "name": "codex-linux-native-rebuild",
+  "private": true
+}
+JSON
+
+  if ! (
+    cd "$stage_dir" &&
+    npm install \
+      --no-save \
+      --package-lock=false \
+      --install-strategy=nested \
+      --build-from-source \
+      "$module_name@$module_version"
+  ); then
+    warn "Fresh Electron-targeted install failed for ${module_name}@${module_version}."
+    return 1
+  fi
+
+  if [[ ! -d "$staged_module_dir" ]]; then
+    warn "Fresh install did not produce a module directory for ${module_name}."
+    return 1
+  fi
+
+  rm -rf "$target_dir"
+  mkdir -p "$(dirname "$target_dir")"
+  cp -a "$staged_module_dir" "$target_dir"
+
+  echo "Installed fresh $module_name@$module_version into $target_dir"
   return 0
 }
 

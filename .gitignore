@@ -1,9 +1,12 @@
 # Generated wrapper artifacts
 work/
+Codex.dmg
+*.dmg
 
 # Caches created by setup and electron/npm
 .npm-cache/
 .cache/
+.electron-npx-cache/
 work/.npm-cache/
 work/.cache/
 

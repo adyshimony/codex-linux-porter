@@ -1,15 +1,11 @@
 # Codex Linux Porter (Ubuntu/Linux)
 
 > [!IMPORTANT]
-> This is an unofficial community project for running the macOS Codex app on Linux.
-> It is not affiliated with, endorsed by, or supported by OpenAI.
-> Treat it as a temporary bridge until an official Linux app exists.
+> This is an unofficial community project for running the macOS Codex app on Linux until an official version is out. It is not affiliated with, endorsed by, or supported by OpenAI.
 
 This project ports the macOS Codex Electron app to Linux by reusing the app payload from the DMG, rebuilding the platform-specific pieces, and launching it with a Linux Electron runtime. It is an unofficial compatibility layer, not an official OpenAI Linux app.
 
-
 ![](assets/20260311_233717_codexonubuntu.png)
-
 
 ## What this porter does
 

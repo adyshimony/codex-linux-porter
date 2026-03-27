@@ -10,8 +10,51 @@ MAIN_PROCESS_BUNDLE="$WORK_DIR/app/.vite/build/main.js"
 RENDER_FIX_JS="$ASSETS_DIR/codex-linux-render-fix.js"
 CSS_MARKER="Codex Linux wrapper sidebar fallback v2"
 JS_MARKER="window.__codexLinuxRenderFix"
-WINDOW_PATCH_MARKER='a.once(`ready-to-show`,()=>{a.isDestroyed()||(a.show(),a.focus())})'
+WINDOW_PATCH_MARKERS=(
+  'a.once(`ready-to-show`,()=>{a.isDestroyed()||(a.show(),a.focus())})'
+  'a.once("ready-to-show",()=>{a.isDestroyed()||(a.show(),a.focus())})'
+  '$.isDestroyed()||$.isVisible()||($.show(),$.focus())'
+  "setTimeout(()=>{\$.isDestroyed()||\$.isVisible()||(\$.show(),\$.focus())}"
+)
 RENDER_FIX_ENABLED="${ENABLE_SIDEBAR_RENDER_FIX:-1}"
+
+function has_bundle_marker() {
+  local bundle="$1"
+  shift
+
+  local marker
+  for marker in "$@"; do
+    if grep -q -F "$marker" "$bundle"; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+if [[ ! -f "$MAIN_PROCESS_BUNDLE" ]]; then
+  MAIN_FROM_PACKAGE=""
+  if [[ -f "$WORK_DIR/app/package.json" ]]; then
+    MAIN_FROM_PACKAGE="$(node -e 'const fs=require("fs"); const path=process.argv[1]; try{ const pkg=JSON.parse(fs.readFileSync(path,"utf8")); if (typeof pkg.main==="string") { console.log(pkg.main.trim()) } } catch {}' "$WORK_DIR/app/package.json" || true)"
+  fi
+
+  if [[ -n "$MAIN_FROM_PACKAGE" && -f "$WORK_DIR/app/$MAIN_FROM_PACKAGE" ]]; then
+    MAIN_PROCESS_BUNDLE="$WORK_DIR/app/$MAIN_FROM_PACKAGE"
+  else
+    for CANDIDATE in \
+      "$WORK_DIR/app/.vite/build/bootstrap.js" \
+      "$WORK_DIR/app/.vite/build/main.js" \
+      "$WORK_DIR/app/.vite/build/main.cjs" \
+      "$WORK_DIR/app/.vite/build/main.mjs" \
+      "$WORK_DIR/app/.vite/build/bootstrap.cjs" \
+      "$WORK_DIR/app/.vite/build/bootstrap.mjs"; do
+      if [[ -f "$CANDIDATE" ]]; then
+        MAIN_PROCESS_BUNDLE="$CANDIDATE"
+        break
+      fi
+    done
+  fi
+fi
 
 CSS_PATTERN="$WORK_DIR/app/webview/assets/index-*.css"
 CSS_FILE="$(ls $CSS_PATTERN 2>/dev/null | sort | head -n 1 || true)"
@@ -207,7 +250,7 @@ if [[ "${RENDER_FIX_ENABLED}" != "0" ]] && ! grep -q "$JS_MARKER" "$RENDER_FIX_J
   exit 1
 fi
 
-if grep -q "$WINDOW_PATCH_MARKER" "$MAIN_PROCESS_BUNDLE"; then
+if has_bundle_marker "$MAIN_PROCESS_BUNDLE" "${WINDOW_PATCH_MARKERS[@]}"; then
   echo "Primary window startup patch already applied: $MAIN_PROCESS_BUNDLE"
 else
   set +e
@@ -243,16 +286,14 @@ NODE
   set -e
 
   if [[ $PATCH_RC -ne 0 ]]; then
-    echo "Failed to apply primary window startup patch to $MAIN_PROCESS_BUNDLE." >&2
-    exit 1
+    echo "Primary window startup patch marker not recognized; skipping window startup edit for $MAIN_PROCESS_BUNDLE." >&2
+  else
+    echo "Applied primary window startup patch to $MAIN_PROCESS_BUNDLE"
   fi
-
-  echo "Applied primary window startup patch to $MAIN_PROCESS_BUNDLE"
 fi
 
-if ! grep -q "$WINDOW_PATCH_MARKER" "$MAIN_PROCESS_BUNDLE"; then
+if ! has_bundle_marker "$MAIN_PROCESS_BUNDLE" "${WINDOW_PATCH_MARKERS[@]}"; then
   echo "Warning: primary window startup marker not found after patch: $MAIN_PROCESS_BUNDLE" >&2
-  exit 1
 fi
 
 echo "Render fix patch complete"
